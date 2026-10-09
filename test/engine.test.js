@@ -160,7 +160,7 @@ test("scanParagraph counts the ordinal over all substring occurrences", () => {
 test("scanParagraph sets prev to null unless only whitespace separates the words", () => {
   assert.equal(engine.scanParagraph("Mitarbeiter kommen.", INDEX)[0].prev, null);
   assert.equal(engine.scanParagraph("Heute, Mitarbeiter kommen.", INDEX)[0].prev, null);
-  assert.equal(engine.scanParagraph("die Mitarbeiter", INDEX)[0].prev, "die");
+  assert.equal(engine.scanParagraph("die\u00a0Mitarbeiter", INDEX)[0].prev, "die");
 });
 
 test("scanParagraph limits context to 40 characters per side", () => {
