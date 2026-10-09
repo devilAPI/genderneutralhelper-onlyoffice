@@ -1,7 +1,7 @@
 # Gender-Neutral Wording Helper for OnlyOffice — Design
 
 Date: 2026-10-09
-Status: awaiting review
+Status: approved
 
 ## Purpose
 
@@ -45,17 +45,20 @@ config.json                 plugin manifest
 index.html                  panel markup
 resources/css/panel.css     panel styling (uses OnlyOffice theme variables)
 resources/img/              icons (light and dark, 1x and 2x)
-translations/langs.json     list of available UI languages
-translations/de-DE.json     German UI strings
-translations/en-US.json     English UI strings
+translations/langs.json     list of available UI translations
+translations/en-US.json     English translation of the German UI strings
 scripts/dictionary.js       bundled entries
 scripts/engine.js           pure logic: tokenise, match, suggest
-scripts/settings.js         load, save, export, import of user settings
+scripts/settings.js         load, save, parse of user settings
+scripts/strings.js          all UI strings in German (the source language)
 scripts/document.js         OnlyOffice API access
-scripts/panel.js            UI wiring
+scripts/panel.js            findings UI
+scripts/settings-view.js    settings section UI
+tools/install-desktop.sh    copies the plugin into Desktop Editors
 test/engine.test.js         unit tests
 test/dictionary.test.js     dictionary consistency tests
 test/settings.test.js       settings validation tests
+test/translations.test.js   every UI string has a translation
 README.md                   install instructions and manual test checklist
 ```
 
@@ -126,7 +129,9 @@ A user entry with the same `id` as a bundled entry replaces it.
 
 ## Engine
 
-`scripts/engine.js` is pure and has three public functions.
+`scripts/engine.js` is pure. Its three main functions are described here; it
+also exports small helpers built on them (`scanDocument`, `suggestAll`,
+`orderForReplace`, `findingKey`, `validateEntry`, `mergeEntries`).
 
 ### `buildIndex(entries, disabledIds)`
 
@@ -242,26 +247,27 @@ Details:
 
 ## Editor access
 
-`scripts/document.js` exposes four asynchronous functions. Each wraps
+`scripts/document.js` exposes three asynchronous functions. Each wraps
 `window.Asc.plugin.callCommand`, passes its inputs through `Asc.scope`, and
-resolves with the command's return value.
+resolves with the command's return value. A target describes one finding:
+paragraph index, form, ordinal, start offset, the paragraph text seen at scan
+time, and the replacement.
 
 - `readParagraphs()` returns the array of paragraph texts from
   `Api.GetDocument().GetAllParagraphs()`.
-- `select(paragraphIndex, form, ordinal, expectedText)` finds the range with
+- `select(target)` finds the range with
   `paragraph.Search(form, true)[ordinal]` and selects it.
-- `replace(paragraphIndex, form, ordinal, expectedText, replacement)` replaces
-  that range's text with `replacement`, keeping the formatting of the replaced
-  text.
-- `replaceMany(items)` applies several replacements in one command. Items are
-  processed from the last paragraph to the first, and within a paragraph from
-  the highest ordinal to the lowest, so earlier ordinals stay valid.
+- `replaceMany(targets)` replaces each target's range with its replacement in
+  one command, keeping the formatting of the replaced text. A single
+  replacement is a list of one. Targets are processed from the last paragraph
+  to the first, and within a paragraph from the last position to the first,
+  so earlier ordinals stay valid.
 
-Stale-position check: `select`, `replace` and `replaceMany` first compare the
-paragraph's current text with `expectedText` (the text seen at scan time). If
-they differ, or the range does not exist, the function changes nothing and
-resolves with `{ ok: false, reason: "stale" }`. `replaceMany` skips stale
-items and reports how many it skipped.
+Stale-position check: before the first change to a paragraph, its current
+text is compared with the text seen at scan time. If they differ, or the
+range does not exist, that target is skipped and nothing is changed for it.
+Both functions resolve with `{ done, stale }`: how many targets were applied
+and how many were skipped as stale.
 
 Implementation risk: the exact API call that replaces a range's text while
 keeping its formatting must be confirmed in a running editor. The
@@ -287,8 +293,8 @@ Behaviour:
 - "Replace" replaces that finding with the chosen suggestion, then rescans the
   document so that positions are current.
 - "Replace all" uses each finding's currently chosen suggestion, then rescans.
-- "Ignore" hides the finding until the next manual scan. The item's menu also
-  offers "Never flag this word", which adds the entry to `disabledIds`.
+- "Ignore" hides the finding until the next manual scan. A third button,
+  "Never flag", adds the entry to `disabledIds`.
 - Changing the primary style recomputes suggestions without rescanning.
 - A stale result shows "The document has changed. Please scan again." and
   leaves the list as it is.
@@ -296,8 +302,10 @@ Behaviour:
 - The panel follows the editor's light or dark theme through the
   `onThemeChanged` plugin event.
 
-All visible strings come from the translation files. Hints are stored as keys
-(`checkArticle`, `checkCase`, `noNeutralForm`) and translated in the panel.
+All visible strings are defined in German in `scripts/strings.js` and
+translated through the editor's translation mechanism; `en-US.json` holds the
+English versions. Hints are stored as keys (`checkArticle`, `checkCase`,
+`noNeutralForm`) and translated in the panel.
 
 ## Error handling
 
