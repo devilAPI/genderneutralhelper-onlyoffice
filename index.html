@@ -5,14 +5,28 @@
   <title>Gendergerechte Sprache</title>
   <script src="./../v1/plugins.js"></script>
   <link rel="stylesheet" href="./../v1/plugins.css">
+  <link rel="stylesheet" href="resources/css/panel.css">
 </head>
 <body>
-  <button id="dbgRead">Read</button>
-  <button id="dbgSelect">Select 2nd</button>
-  <button id="dbgReplace">Replace 2nd</button>
-  <button id="dbgAll">Replace all</button>
-  <pre id="dbgOut" style="white-space: pre-wrap"></pre>
+  <div id="app">
+    <label for="style" data-i18n="style"></label>
+    <select id="style"></select>
+    <button id="scan" type="button" class="primary" data-i18n="scan"></button>
+    <p id="notice" class="notice" hidden></p>
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <button id="retry" type="button" data-i18n="retry" hidden></button>
+    <ul id="findings"></ul>
+    <button id="replaceAll" type="button" data-i18n="replaceAll" hidden></button>
+    <details id="settings">
+      <summary data-i18n="settings"></summary>
+      <div id="settingsBody"></div>
+    </details>
+  </div>
+  <script src="scripts/engine.js"></script>
+  <script src="scripts/dictionary.js"></script>
+  <script src="scripts/settings.js"></script>
+  <script src="scripts/strings.js"></script>
   <script src="scripts/document.js"></script>
-  <script src="scripts/debug.js"></script>
+  <script src="scripts/panel.js"></script>
 </body>
 </html>
