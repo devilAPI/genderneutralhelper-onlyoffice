@@ -95,3 +95,101 @@ test("mergeEntries puts custom entries first and lets them replace bundled ones"
   assert.deepEqual(merged.map((e) => e.id), ["kunde", "mitarbeiter"]);
   assert.equal(merged[0], custom);
 });
+
+const INDEX = engine.buildIndex(ALL, []);
+const forms = (text) => engine.scanParagraph(text, INDEX).map((f) => f.form);
+
+test("scanParagraph finds whole-word matches with their details", () => {
+  const found = engine.scanParagraph("Alle Mitarbeiter und Kunden sind eingeladen.", INDEX);
+  assert.equal(found.length, 2);
+  assert.deepEqual(found[0], {
+    form: "Mitarbeiter",
+    start: 5,
+    ordinal: 0,
+    entryId: "mitarbeiter",
+    numbers: ["sg", "pl"],
+    prev: "alle",
+    context: { before: "Alle ", after: " und Kunden sind eingeladen." }
+  });
+  assert.equal(found[1].form, "Kunden");
+  assert.equal(found[1].prev, "und");
+});
+
+test("scanParagraph ignores compounds, feminine forms and hyphenated words", () => {
+  assert.deepEqual(forms("Das Mitarbeitergespräch mit der Mitarbeiterin im Mitarbeiter-Büro."), []);
+});
+
+test("scanParagraph ignores truncated compounds", () => {
+  assert.deepEqual(forms("Die Mitarbeiter- und Kundenbefragung läuft."), []);
+  assert.deepEqual(forms("Betriebs-Mitarbeiter"), []);
+});
+
+test("scanParagraph ignores forms that are already gendered", () => {
+  assert.deepEqual(forms("Mitarbeiter:innen, Mitarbeiter*innen, Mitarbeiter_in, Mitarbeiter/-innen, Mitarbeiter/innen, Mitarbeiter:in."), []);
+  assert.deepEqual(forms("MitarbeiterInnen"), []);
+});
+
+test("scanParagraph still flags a form followed by an unrelated slash word", () => {
+  assert.deepEqual(forms("Mitarbeiter/intern"), ["Mitarbeiter"]);
+});
+
+test("scanParagraph ignores pairs in either order", () => {
+  assert.deepEqual(forms("Mitarbeiterinnen und Mitarbeiter"), []);
+  assert.deepEqual(forms("Mitarbeiter und Mitarbeiterinnen"), []);
+  assert.deepEqual(forms("Mitarbeiterin oder Mitarbeiter"), []);
+  assert.deepEqual(forms("Kundinnen/Kunden"), []);
+  assert.deepEqual(forms("den Kundinnen bzw. Kunden"), []);
+});
+
+test("scanParagraph ignores pairs written with articles", () => {
+  assert.deepEqual(forms("die Mitarbeiterinnen und die Mitarbeiter"), []);
+  assert.deepEqual(forms("der Arzt oder die Ärztin"), []);
+});
+
+test("scanParagraph flags a form joined to another word's feminine form", () => {
+  assert.deepEqual(forms("Kundinnen und Mitarbeiter"), ["Mitarbeiter"]);
+});
+
+test("scanParagraph counts the ordinal over all substring occurrences", () => {
+  const found = engine.scanParagraph("Die Mitarbeiterin und das Mitarbeitergespräch: der Mitarbeiter fehlt.", INDEX);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].ordinal, 2);
+  assert.equal(found[0].prev, "der");
+});
+
+test("scanParagraph sets prev to null unless only whitespace separates the words", () => {
+  assert.equal(engine.scanParagraph("Mitarbeiter kommen.", INDEX)[0].prev, null);
+  assert.equal(engine.scanParagraph("Heute, Mitarbeiter kommen.", INDEX)[0].prev, null);
+  assert.equal(engine.scanParagraph("die Mitarbeiter", INDEX)[0].prev, "die");
+});
+
+test("scanParagraph limits context to 40 characters per side", () => {
+  const found = engine.scanParagraph("x".repeat(60) + " Mitarbeiter " + "y".repeat(60), INDEX);
+  assert.equal(found[0].context.before.length, 40);
+  assert.equal(found[0].context.after.length, 40);
+});
+
+test("scanParagraph copes with punctuation, line breaks, empty text and capitals", () => {
+  assert.deepEqual(forms("Die „Mitarbeiter“ (Kunden) kommen.\r\n"), ["Mitarbeiter", "Kunden"]);
+  assert.deepEqual(forms(""), []);
+  assert.deepEqual(forms("\r\n"), []);
+  assert.deepEqual(forms("MITARBEITER und mitarbeiter"), []);
+  assert.deepEqual(forms("😀 Ärzte 😀"), ["Ärzte"]);
+});
+
+test("scanParagraph gives independent results on repeated calls", () => {
+  assert.deepEqual(forms("Kunde"), ["Kunde"]);
+  assert.deepEqual(forms("Kunde"), ["Kunde"]);
+});
+
+test("scanDocument adds the paragraph index", () => {
+  const found = engine.scanDocument(["Der Kunde wartet.", "", "Alle Mitarbeiter."], INDEX);
+  assert.deepEqual(found.map((f) => [f.p, f.form]), [[0, "Kunde"], [2, "Mitarbeiter"]]);
+});
+
+test("findingKey separates findings and is stable for equal findings", () => {
+  const a = engine.scanDocument(["Der Kunde und der Kunde."], INDEX);
+  const b = engine.scanDocument(["Der Kunde und der Kunde."], INDEX);
+  assert.notEqual(engine.findingKey(a[0]), engine.findingKey(a[1]));
+  assert.equal(engine.findingKey(a[0]), engine.findingKey(b[0]));
+});

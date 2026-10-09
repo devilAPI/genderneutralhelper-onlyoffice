@@ -63,11 +63,86 @@
     return { forms: forms, byId: byId, skipped: skipped };
   }
 
+  var WORD = /\p{L}+(?:-\p{L}+)*/gu;
+  var GENDERED_AFTER = /^(?:[:*_]|\/-?)in(?:nen)?(?!\p{L})/u;
+  var JOIN = "(?:\\s+(?:und|oder|bzw\\.)\\s+|\\s*\\/\\s*)";
+  var ARTICLE = "(?:(?:der|die|den|dem|des)\\s+)?";
+  var PAIR_BEFORE = new RegExp("(\\p{L}+)" + JOIN + ARTICLE + "$", "u");
+  var PAIR_AFTER = new RegExp("^" + JOIN + ARTICLE + "(\\p{L}+)", "u");
+
+  function countBefore(text, form, start) {
+    var count = 0;
+    var at = text.indexOf(form);
+    while (at !== -1 && at < start) {
+      count++;
+      at = text.indexOf(form, at + form.length);
+    }
+    return count;
+  }
+
+  function isFeminine(entry, match) {
+    return !!match && (match[1] === entry.fem.sg || match[1] === entry.fem.pl);
+  }
+
+  function matchToken(text, token, prevToken, index) {
+    var hit = index.forms.get(token.word);
+    if (!hit) return null;
+    var before = text.slice(0, token.start);
+    var after = text.slice(token.end);
+    if (before.endsWith("-") || after.startsWith("-")) return null;
+    if (GENDERED_AFTER.test(after)) return null;
+    var entry = index.byId.get(hit.entryId);
+    if (isFeminine(entry, PAIR_BEFORE.exec(before))) return null;
+    if (isFeminine(entry, PAIR_AFTER.exec(after))) return null;
+    var gap = prevToken ? text.slice(prevToken.end, token.start) : "";
+    return {
+      form: token.word,
+      start: token.start,
+      ordinal: countBefore(text, token.word, token.start),
+      entryId: hit.entryId,
+      numbers: hit.numbers.slice(),
+      prev: prevToken && /^\s+$/.test(gap) ? prevToken.word.toLowerCase() : null,
+      context: { before: before.slice(-40), after: after.slice(0, 40) }
+    };
+  }
+
+  function scanParagraph(text, index) {
+    var findings = [];
+    var prevToken = null;
+    var match;
+    WORD.lastIndex = 0;
+    while ((match = WORD.exec(text)) !== null) {
+      var token = { word: match[0], start: match.index, end: match.index + match[0].length };
+      var finding = matchToken(text, token, prevToken, index);
+      if (finding) findings.push(finding);
+      prevToken = token;
+    }
+    return findings;
+  }
+
+  function scanDocument(paragraphs, index) {
+    var all = [];
+    paragraphs.forEach(function (text, p) {
+      scanParagraph(String(text), index).forEach(function (finding) {
+        finding.p = p;
+        all.push(finding);
+      });
+    });
+    return all;
+  }
+
+  function findingKey(finding) {
+    return [finding.p, finding.form, finding.context.before.slice(-20), finding.context.after.slice(0, 20)].join("|");
+  }
+
   GNH.engine = {
     STYLES: STYLES,
     validateEntry: validateEntry,
     mergeEntries: mergeEntries,
-    buildIndex: buildIndex
+    buildIndex: buildIndex,
+    scanParagraph: scanParagraph,
+    scanDocument: scanDocument,
+    findingKey: findingKey
   };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = GNH.engine;
