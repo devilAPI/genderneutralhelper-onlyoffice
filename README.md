@@ -16,8 +16,8 @@ npm run install:desktop
 Then restart OnlyOffice Desktop Editors, open a text document and start
 "Gendergerechte Sprache" from the Plugins tab.
 
-On other systems, copy `config.json`, `index.html`, `resources`, `scripts`
-and `translations` into a folder named
+On other systems, copy `config.json`, `index.html`, `resources` and
+`scripts` into a folder named
 `{6F1C2A9E-3B7D-4E58-9A41-C2D07B5E8F13}` inside the editor's `sdkjs-plugins`
 directory.
 
@@ -45,6 +45,10 @@ computer; use export and import to move them.
 - Headers, footers, footnotes and text boxes may not be scanned.
 - An ignored finding can reappear after replacing a word within about 20
   characters of it.
+- A dictionary word directly after "Herr", "Herrn" or "Frau" is taken for a
+  surname and skipped. Surnames without such a title (for example "Koch" or
+  "Richter") are flagged like any other word.
+- Behaviour with track changes switched on is untested.
 
 ## Development
 
@@ -56,6 +60,10 @@ The language logic in `scripts/engine.js`, `scripts/dictionary.js` and
 `scripts/settings.js` is unit-tested. `scripts/document.js`,
 `scripts/panel.js` and `scripts/settings-view.js` are covered by the manual
 checklist below.
+
+The UI strings are in `scripts/strings.js` (German) and
+`scripts/strings-en.js` (English, used when the editor language starts with
+"en"). Both tables must have the same keys; `npm test` checks this.
 
 ## Manual test checklist
 
@@ -86,4 +94,9 @@ Check:
       restores the settings; importing a non-settings file is rejected.
 - [ ] Settings survive an editor restart.
 - [ ] The panel is readable in a light and a dark editor theme.
-- [ ] With the editor in English, the panel is in English.
+- [ ] With the editor language `en`, the panel is in English.
+- [ ] With the editor language `en-US`, the panel is in English.
+- [ ] Double-clicking "Ersetzen" replaces the word once and shows no error.
+- [ ] "Alle ersetzen" on a long document (2,000+ paragraphs) finishes and
+      shows its progress.
+- [ ] With track changes on, "Ersetzen" and "Alle ersetzen" behave sensibly.

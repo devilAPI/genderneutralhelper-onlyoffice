@@ -7,6 +7,8 @@
   var plugin = window.Asc.plugin;
   var doc = window.document;
 
+  var BATCH_SIZE = 25;
+
   var state = {
     ready: false,
     settings: store.defaults(),
@@ -16,12 +18,29 @@
     items: [],
     ignored: new Set(),
     status: "idle",
-    message: ""
+    message: "",
+    // True from the start of an editor command until it has settled.
+    busy: false,
+    // A paragraph read is under way.
+    reading: false,
+    // "done / total" while replacements are sent, otherwise "".
+    progress: "",
+    // Settings changed while busy; the items are rebuilt when the command ends.
+    rebuildDue: false
   };
 
+  function strings() {
+    var info = plugin.info;
+    return GNH.pickStrings(info ? info.lang : undefined);
+  }
+
   function t(key, arg) {
-    var text = plugin.tr(GNH.strings[key]);
-    return arg === undefined ? text : text.replace("%1", String(arg));
+    var text = strings()[key];
+    if (arg === undefined) return text;
+    // A function, so that "$&" and the like in arg are taken literally.
+    return text.replace("%1", function () {
+      return String(arg);
+    });
   }
 
   function el(tag, attrs, children) {
@@ -51,30 +70,49 @@
     state.index = engine.buildIndex(entries, state.settings.disabledIds);
   }
 
+  // The suggestion texts the user picked, by finding key. Items still on
+  // their default are left out, so a changed default takes effect.
+  function chosenTexts() {
+    var texts = new Map();
+    state.items.forEach(function (item) {
+      if (item.chosen > 0) texts.set(engine.findingKey(item.finding), item.suggestions[item.chosen].text);
+    });
+    return texts;
+  }
+
   // Recomputes findings from the cached paragraph texts. No editor access.
   function rebuildItems() {
     if (!state.paragraphs) return;
     var s = state.settings;
+    var chosen = chosenTexts();
     state.items = engine.scanDocument(state.paragraphs, state.index)
       .filter(function (finding) {
         return !state.ignored.has(engine.findingKey(finding));
       })
       .map(function (finding) {
         var entry = state.index.byId.get(finding.entryId);
+        var suggestions = engine.suggestAll(finding, entry, s.primaryStyle, s.fallbackStyle);
         return {
           finding: finding,
-          suggestions: engine.suggestAll(finding, entry, s.primaryStyle, s.fallbackStyle),
-          chosen: 0
+          suggestions: suggestions,
+          chosen: engine.indexOfText(suggestions, chosen.get(engine.findingKey(finding)))
         };
       });
     state.status = state.items.length ? "findings" : "none";
   }
 
   function commit(next) {
+    if (next.primaryStyle !== state.settings.primaryStyle) {
+      // A new primary style forgets every remembered choice.
+      state.items.forEach(function (item) {
+        item.chosen = 0;
+      });
+    }
     state.settings = next;
     state.persistent = store.save(storage(), next);
     rebuildIndex();
-    rebuildItems();
+    if (state.busy) state.rebuildDue = true;
+    else rebuildItems();
     render();
     if (GNH.settingsView) GNH.settingsView.refresh();
   }
@@ -83,19 +121,40 @@
     state.paragraphs = null;
     state.items = [];
     state.status = "error";
-    render();
+    state.message = "";
   }
 
-  function scan(keepIgnored, message) {
-    if (!keepIgnored) state.ignored = new Set();
-    state.status = "scanning";
+  // Runs one user action that talks to the editor. `work` returns a promise;
+  // until it settles the panel is busy and starts nothing else.
+  function start(work) {
+    if (state.busy) return;
+    state.busy = true;
+    render();
+    new Promise(function (resolve) {
+      resolve(work());
+    }).catch(fail).then(function () {
+      state.busy = false;
+      state.reading = false;
+      state.progress = "";
+      if (state.rebuildDue) {
+        state.rebuildDue = false;
+        rebuildItems();
+      }
+      render();
+    });
+  }
+
+  // Reads the document and rebuilds the findings. With keepList the current
+  // list stays on screen (disabled) until the new one is there.
+  function scan(keepList, message) {
     state.message = message || "";
+    state.reading = true;
+    if (!keepList) state.status = "scanning";
     render();
     return editor.readParagraphs().then(function (paragraphs) {
       state.paragraphs = paragraphs;
       rebuildItems();
-      render();
-    }).catch(fail);
+    });
   }
 
   function target(item, replacement) {
@@ -110,34 +169,59 @@
     };
   }
 
-  function showStale() {
-    state.message = t("stale");
-    render();
+  function selectItem(item) {
+    start(function () {
+      return editor.select(target(item, null)).then(function (result) {
+        if (result.done !== 1) state.message = t("stale");
+      });
+    });
   }
 
-  function selectItem(item) {
-    editor.select(target(item, null)).then(function (result) {
-      if (result.done !== 1) showStale();
-    }).catch(fail);
+  // Sends the batches one after another and resolves with the summed counts.
+  function sendBatches(batches, total) {
+    var sum = { done: 0, stale: 0 };
+    function send(i) {
+      if (i === batches.length) return Promise.resolve(sum);
+      state.progress = (sum.done + sum.stale) + " / " + total;
+      render();
+      return editor.replaceMany(batches[i]).then(function (result) {
+        sum.done += result.done;
+        sum.stale += result.stale;
+        return send(i + 1);
+      });
+    }
+    return send(0);
   }
 
   function replaceItems(items) {
-    var targets = engine.orderForReplace(items.map(function (item) {
-      return target(item, item.suggestions[item.chosen].text);
-    }));
-    editor.replaceMany(targets).then(function (result) {
-      if (result.done === 0) return showStale();
-      return scan(true, result.stale > 0 ? t("skipped", result.stale) : "");
-    }).catch(fail);
+    start(function () {
+      var targets = engine.orderForReplace(items.map(function (item) {
+        return target(item, item.suggestions[item.chosen].text);
+      }));
+      return sendBatches(engine.batchTargets(targets, BATCH_SIZE), targets.length).then(function (sum) {
+        state.progress = "";
+        if (sum.done === 0) {
+          state.message = t("stale");
+          return undefined;
+        }
+        return scan(true, sum.stale > 0 ? t("skipped", sum.stale) : "");
+      }, function () {
+        // A batch failed; earlier batches may have changed the document.
+        state.progress = "";
+        return scan(true, t("error"));
+      });
+    });
   }
 
   function ignoreItem(item) {
+    if (state.busy) return;
     state.ignored.add(engine.findingKey(item.finding));
     rebuildItems();
     render();
   }
 
   function neverFlag(item) {
+    if (state.busy) return;
     commit(Object.assign({}, state.settings, {
       disabledIds: state.settings.disabledIds.concat(item.finding.entryId)
     }));
@@ -150,9 +234,13 @@
 
   function renderItem(item) {
     var f = item.finding;
+    var busy = state.busy;
     var hint = el("p", { className: "hint", text: hintText(item) });
     var select = el("select", {
+      "aria-label": t("chooseSuggestion"),
+      disabled: busy,
       onchange: function () {
+        if (state.busy) return;
         item.chosen = select.selectedIndex;
         hint.textContent = hintText(item);
       }
@@ -161,7 +249,7 @@
     }));
     select.selectedIndex = item.chosen;
     return el("li", { className: "finding" }, [
-      el("button", { type: "button", className: "ctx", title: t("jump"), onclick: function () { selectItem(item); } }, [
+      el("button", { type: "button", className: "ctx", title: t("jump"), disabled: busy, onclick: function () { selectItem(item); } }, [
         doc.createTextNode(f.context.before),
         el("mark", { text: f.form }),
         doc.createTextNode(f.context.after)
@@ -169,14 +257,27 @@
       select,
       hint,
       el("div", { className: "actions" }, [
-        el("button", { type: "button", text: t("replace"), onclick: function () { replaceItems([item]); } }),
-        el("button", { type: "button", text: t("ignore"), onclick: function () { ignoreItem(item); } }),
-        el("button", { type: "button", text: t("never"), onclick: function () { neverFlag(item); } })
+        el("button", { type: "button", text: t("replace"), disabled: busy, onclick: function () { replaceItems([item]); } }),
+        el("button", { type: "button", text: t("ignore"), disabled: busy, onclick: function () { ignoreItem(item); } }),
+        el("button", { type: "button", text: t("never"), disabled: busy, onclick: function () { neverFlag(item); } })
       ])
     ]);
   }
 
+  function summaryText() {
+    if (state.progress) return t("replacing", state.progress);
+    if (state.reading) return t("scanning");
+    return {
+      idle: t("idle"),
+      scanning: t("scanning"),
+      none: t("none"),
+      error: t("error"),
+      findings: t("count", state.items.length)
+    }[state.status];
+  }
+
   function render() {
+    var top = window.scrollY;
     var notes = [];
     if (!state.persistent) notes.push(t("noStorage"));
     if (state.message) notes.push(state.message);
@@ -184,17 +285,12 @@
     notice.textContent = notes.join(" ");
     notice.hidden = notes.length === 0;
 
-    var summary = {
-      idle: t("idle"),
-      scanning: t("scanning"),
-      none: t("none"),
-      error: t("error"),
-      findings: t("count", state.items.length)
-    };
-    doc.getElementById("summary").textContent = summary[state.status];
-    doc.getElementById("scan").disabled = state.status === "scanning";
+    doc.getElementById("summary").textContent = summaryText();
+    doc.getElementById("scan").disabled = state.busy;
     doc.getElementById("retry").hidden = state.status !== "error";
+    doc.getElementById("retry").disabled = state.busy;
     doc.getElementById("replaceAll").hidden = state.status !== "findings";
+    doc.getElementById("replaceAll").disabled = state.busy;
     doc.getElementById("style").value = state.settings.primaryStyle;
 
     var list = doc.getElementById("findings");
@@ -204,9 +300,12 @@
         list.appendChild(renderItem(item));
       });
     }
+    // Rebuilding the list must not move the page.
+    window.scrollTo(0, top);
   }
 
   function applyStaticText() {
+    doc.documentElement.lang = strings() === GNH.stringsEn ? "en" : "de";
     Array.prototype.forEach.call(doc.querySelectorAll("[data-i18n]"), function (node) {
       node.textContent = t(node.getAttribute("data-i18n"));
     });
@@ -235,8 +334,15 @@
     doc.getElementById("style").addEventListener("change", function (event) {
       commit(Object.assign({}, state.settings, { primaryStyle: event.target.value }));
     });
-    doc.getElementById("scan").addEventListener("click", function () { scan(false); });
-    doc.getElementById("retry").addEventListener("click", function () { scan(true); });
+    doc.getElementById("scan").addEventListener("click", function () {
+      start(function () {
+        state.ignored = new Set();
+        return scan(false);
+      });
+    });
+    doc.getElementById("retry").addEventListener("click", function () {
+      start(function () { return scan(true); });
+    });
     doc.getElementById("replaceAll").addEventListener("click", function () { replaceItems(state.items); });
     applyStaticText();
     render();

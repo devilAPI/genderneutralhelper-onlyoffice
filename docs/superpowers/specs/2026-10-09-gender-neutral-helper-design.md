@@ -45,12 +45,11 @@ config.json                 plugin manifest
 index.html                  panel markup
 resources/css/panel.css     panel styling (uses OnlyOffice theme variables)
 resources/img/              icons (light and dark, 1x and 2x)
-translations/langs.json     list of available UI translations
-translations/en-US.json     English translation of the German UI strings
 scripts/dictionary.js       bundled entries
 scripts/engine.js           pure logic: tokenise, match, suggest
 scripts/settings.js         load, save, parse of user settings
 scripts/strings.js          all UI strings in German (the source language)
+scripts/strings-en.js       the same strings in English, and the language choice
 scripts/document.js         OnlyOffice API access
 scripts/panel.js            findings UI
 scripts/settings-view.js    settings section UI
@@ -58,7 +57,7 @@ tools/install-desktop.sh    copies the plugin into Desktop Editors
 test/engine.test.js         unit tests
 test/dictionary.test.js     dictionary consistency tests
 test/settings.test.js       settings validation tests
-test/translations.test.js   every UI string has a translation
+test/translations.test.js   both string tables have the same keys
 README.md                   install instructions and manual test checklist
 ```
 
@@ -302,10 +301,13 @@ Behaviour:
 - The panel follows the editor's light or dark theme through the
   `onThemeChanged` plugin event.
 
-All visible strings are defined in German in `scripts/strings.js` and
-translated through the editor's translation mechanism; `en-US.json` holds the
-English versions. Hints are stored as keys (`checkArticle`, `checkCase`,
-`noNeutralForm`) and translated in the panel.
+All visible strings are defined in German in `scripts/strings.js` and in
+English, under the same keys, in `scripts/strings-en.js`. The panel shows the
+English table when the editor language starts with "en" and the German one
+otherwise. The editor's own translation mechanism is not used, because it
+treats English as the source language and loads nothing for it. Hints are
+stored as keys (`checkArticle`, `checkCase`, `noNeutralForm`) and translated
+in the panel.
 
 ## Error handling
 
