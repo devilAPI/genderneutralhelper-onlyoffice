@@ -64,7 +64,11 @@
   }
 
   var WORD = /\p{L}+(?:-\p{L}+)*/gu;
-  var GENDERED_AFTER = /^(?:[:*_]|\/-?)in(?:nen)?(?!\p{L})/u;
+  // Mitarbeiter:innen, *innen, _innen, \u00b7innen, /innen, /-innen and the
+  // bracket forms (innen), (-innen), each also with the singular "in".
+  var GENDERED_AFTER = /^(?:(?:[:*_\u00b7]|\/-?)in(?:nen)?(?!\p{L})|\(-?in(?:nen)?\))/u;
+  // A dictionary word directly after one of these is taken for a surname.
+  var TITLES = new Set(["herr", "herrn", "frau"]);
   var JOIN = "(?:\\s+(?:und|oder|bzw\\.)\\s+|\\s*\\/\\s*)";
   var ARTICLE = "(?:(?:der|die|den|dem|des)\\s+)?";
   var PAIR_BEFORE = new RegExp("(\\p{L}+)" + JOIN + ARTICLE + "$", "u");
@@ -95,13 +99,15 @@
     if (isFeminine(entry, PAIR_BEFORE.exec(before))) return null;
     if (isFeminine(entry, PAIR_AFTER.exec(after))) return null;
     var gap = prevToken ? text.slice(prevToken.end, token.start) : "";
+    var prev = prevToken && /^\s+$/.test(gap) ? prevToken.word.toLowerCase() : null;
+    if (TITLES.has(prev)) return null;
     return {
       form: token.word,
       start: token.start,
       ordinal: countBefore(text, token.word, token.start),
       entryId: hit.entryId,
       numbers: hit.numbers.slice(),
-      prev: prevToken && /^\s+$/.test(gap) ? prevToken.word.toLowerCase() : null,
+      prev: prev,
       context: { before: before.slice(-40), after: after.slice(0, 40) }
     };
   }
@@ -159,9 +165,11 @@
     return entry.fem[number] + (plural ? " und " : " oder ") + form;
   }
 
-  function gendered(entry, style, number, form, forcedHint) {
+  // Every singular suggestion carries checkArticle; pluralHint applies to
+  // plural suggestions only.
+  function gendered(entry, style, number, form, pluralHint) {
     var suggestion = { text: genderedText(entry, style, number, form), style: style, number: number };
-    var hint = forcedHint || (number === "sg" ? "checkArticle" : null);
+    var hint = number === "sg" ? "checkArticle" : pluralHint;
     if (hint) suggestion.hint = hint;
     return [suggestion];
   }
@@ -219,6 +227,33 @@
     });
   }
 
+  // Splits an ordered target list into consecutive batches of at least
+  // `size` targets. Targets of one paragraph stay in one batch, because the
+  // editor compares a paragraph with its scan-time text once per command.
+  function batchTargets(orderedTargets, size) {
+    var min = Math.max(1, size);
+    var batches = [];
+    var current = [];
+    orderedTargets.forEach(function (target) {
+      var last = current[current.length - 1];
+      if (current.length >= min && last.p !== target.p) {
+        batches.push(current);
+        current = [];
+      }
+      current.push(target);
+    });
+    if (current.length) batches.push(current);
+    return batches;
+  }
+
+  // Index of the suggestion with this text, or 0 (the default) if none has it.
+  function indexOfText(suggestions, text) {
+    for (var i = 0; i < suggestions.length; i++) {
+      if (suggestions[i].text === text) return i;
+    }
+    return 0;
+  }
+
   GNH.engine = {
     STYLES: STYLES,
     validateEntry: validateEntry,
@@ -229,7 +264,9 @@
     findingKey: findingKey,
     suggest: suggest,
     suggestAll: suggestAll,
-    orderForReplace: orderForReplace
+    orderForReplace: orderForReplace,
+    batchTargets: batchTargets,
+    indexOfText: indexOfText
   };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = GNH.engine;

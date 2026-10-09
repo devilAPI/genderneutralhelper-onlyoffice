@@ -129,6 +129,31 @@ test("scanParagraph ignores forms that are already gendered", () => {
   assert.deepEqual(forms("MitarbeiterInnen"), []);
 });
 
+test("scanParagraph ignores bracket and middle-dot gendering", () => {
+  assert.deepEqual(forms("Mitarbeiter(innen), Mitarbeiter(-innen), Mitarbeiter(in) und Mitarbeiter(-in)."), []);
+  assert.deepEqual(forms("Mitarbeiter\u00b7innen und Kund\u00b7in, Mitarbeiter\u00b7in"), []);
+});
+
+test("scanParagraph still flags a form followed by other brackets or dots", () => {
+  assert.deepEqual(forms("Mitarbeiter (innen)"), ["Mitarbeiter"]);
+  assert.deepEqual(forms("Mitarbeiter(intern)"), ["Mitarbeiter"]);
+  assert.deepEqual(forms("Mitarbeiter(innen"), ["Mitarbeiter"]);
+  assert.deepEqual(forms("Mitarbeiter\u00b7innenhof"), ["Mitarbeiter"]);
+  assert.deepEqual(forms("Mitarbeiter\u00b7 innen"), ["Mitarbeiter"]);
+});
+
+test("scanParagraph skips words after Herr, Herrn and Frau", () => {
+  assert.deepEqual(forms("Herr Lehrer und Frau Kunde danken Herrn Arzt."), []);
+  assert.deepEqual(forms("HERR Lehrer, frau Kunde"), []);
+  assert.deepEqual(forms("Herr\u00a0Lehrer"), []);
+});
+
+test("scanParagraph still flags words that only stand near a title", () => {
+  assert.deepEqual(forms("Herr, Lehrer und Frau: Kunde"), ["Lehrer", "Kunde"]);
+  assert.deepEqual(forms("Der Herr Müller und der Lehrer"), ["Lehrer"]);
+  assert.deepEqual(forms("Herren Lehrer"), ["Lehrer"]);
+});
+
 test("scanParagraph still flags a form followed by an unrelated slash word", () => {
   assert.deepEqual(forms("Mitarbeiter/intern"), ["Mitarbeiter"]);
 });
@@ -256,10 +281,19 @@ test("suggest uses noun neutrals as stored and flags oblique cases", () => {
 test("suggest falls back when there is no neutral form", () => {
   assert.deepEqual(engine.suggest(finding("Kunden", ["sg", "pl"]), KUNDE, "neutral", "asterisk"), [
     { text: "Kund*innen", style: "asterisk", number: "pl", hint: "noNeutralForm" },
-    { text: "Kund*in", style: "asterisk", number: "sg", hint: "noNeutralForm" }
+    { text: "Kund*in", style: "asterisk", number: "sg", hint: "checkArticle" }
   ]);
   const sgOnly = Object.assign({}, LEHRER, { neutral: { kind: "noun", sg: "Lehrkraft" } });
   assert.deepEqual(texts(engine.suggest(finding("Lehrer", ["sg", "pl"]), sgOnly, "neutral", "colon")), ["Lehrer:innen", "Lehrkraft"]);
+});
+
+test("a plural-only fallback keeps the noNeutralForm hint", () => {
+  assert.deepEqual(engine.suggest(finding("Ärzte", ["pl"]), ARZT, "neutral", "pair"), [
+    { text: "Ärztinnen und Ärzte", style: "pair", number: "pl", hint: "noNeutralForm" }
+  ]);
+  assert.deepEqual(engine.suggest(finding("Arzt", ["sg"]), ARZT, "neutral", "pair"), [
+    { text: "Ärztin oder Arzt", style: "pair", number: "sg", hint: "checkArticle" }
+  ]);
 });
 
 test("suggestAll starts with the primary style and has unique texts", () => {
@@ -273,7 +307,7 @@ test("suggestAll starts with the primary style and has unique texts", () => {
 
 test("suggestAll does not repeat fallback suggestions", () => {
   const all = engine.suggestAll(finding("Kunde", ["sg"]), KUNDE, "neutral", "colon");
-  assert.deepEqual(all[0], { text: "Kund:in", style: "colon", number: "sg", hint: "noNeutralForm" });
+  assert.deepEqual(all[0], { text: "Kund:in", style: "colon", number: "sg", hint: "checkArticle" });
   assert.equal(texts(all).filter((t) => t === "Kund:in").length, 1);
 });
 
@@ -293,4 +327,60 @@ test("ordinals of earlier findings survive replacing later ones first", () => {
   let at = -1;
   for (let i = 0; i <= ordered[1].ordinal; i++) at = after.indexOf(ordered[1].form, at + 1);
   assert.equal(at, ordered[1].start);
+});
+
+const ps = (batches) => batches.map((batch) => batch.map((target) => target.p));
+const targetsAt = (list) => list.map((p, i) => ({ p, start: 100 - i }));
+
+test("batchTargets returns no batches for an empty list", () => {
+  assert.deepEqual(engine.batchTargets([], 25), []);
+});
+
+test("batchTargets cuts exact multiples into equal batches", () => {
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([4, 3, 2, 1]), 2)), [[4, 3], [2, 1]]);
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([6, 5, 4, 3, 2, 1]), 3)), [[6, 5, 4], [3, 2, 1]]);
+});
+
+test("batchTargets leaves a shorter last batch", () => {
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([5, 4, 3]), 2)), [[5, 4], [3]]);
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([5]), 25)), [[5]]);
+});
+
+test("batchTargets never splits a paragraph across batches", () => {
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([5, 5, 5, 3, 2, 2, 1]), 2)), [[5, 5, 5], [3, 2, 2], [1]]);
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([2, 2, 1]), 1)), [[2, 2], [1]]);
+});
+
+test("batchTargets keeps one paragraph bigger than the size in one batch", () => {
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([0, 0, 0, 0, 0]), 2)), [[0, 0, 0, 0, 0]]);
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([7, 0, 0, 0, 0, 0]), 2)), [[7, 0, 0, 0, 0, 0]]);
+});
+
+test("batchTargets preserves order and does not mutate its input", () => {
+  const input = targetsAt([9, 9, 8, 7, 7, 7, 6, 5, 4, 4, 3]);
+  const copy = input.slice();
+  const batches = engine.batchTargets(input, 3);
+  assert.deepEqual([].concat(...batches), copy);
+  batches.forEach((batch, i) => {
+    if (i < batches.length - 1) assert.ok(batch.length >= 3, "batch " + i);
+  });
+  assert.deepEqual(input, copy);
+});
+
+test("batchTargets treats a size below one as one", () => {
+  assert.deepEqual(ps(engine.batchTargets(targetsAt([2, 1]), 0)), [[2], [1]]);
+});
+
+test("indexOfText finds the suggestion with the same text", () => {
+  const list = [{ text: "Kund:innen" }, { text: "Kund:in" }, { text: "Kundinnen und Kunden" }];
+  assert.equal(engine.indexOfText(list, "Kund:in"), 1);
+  assert.equal(engine.indexOfText(list, "Kundinnen und Kunden"), 2);
+  assert.equal(engine.indexOfText(list, "Kund:innen"), 0);
+});
+
+test("indexOfText falls back to the first suggestion", () => {
+  const list = [{ text: "Kund:innen" }, { text: "Kund:in" }];
+  assert.equal(engine.indexOfText(list, "Kund*in"), 0);
+  assert.equal(engine.indexOfText(list, undefined), 0);
+  assert.equal(engine.indexOfText([], "Kund:in"), 0);
 });
