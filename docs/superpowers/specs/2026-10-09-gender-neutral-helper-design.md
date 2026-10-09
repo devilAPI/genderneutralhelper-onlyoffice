@@ -158,7 +158,9 @@ Matching rules:
   "Mitarbeitergespräch", "Mitarbeiter-Gespräch" and "Mitarbeiterin" are not
   flagged.
 - A match is skipped when it is already gendered: when it is directly followed
-  by `:`, `*`, `_`, `/` or `/-` and then `in` or `innen`.
+  by `:`, `*`, `_`, `·`, `/`, `/-`, `(` or `(-` and then `in` or `innen`.
+- A match is skipped when the preceding word is "Herr", "Herrn" or "Frau",
+  because it is then almost always a surname ("Herr Koch").
 - A match is skipped when it is part of a pair: when the entry's feminine
   form stands directly before or after it, joined by "und", "oder", "bzw." or
   "/".
@@ -204,8 +206,9 @@ Details:
 ### Neutral style
 
 - If the entry has no neutral form for the finding's number, the engine uses
-  `fallbackStyle` instead and marks the suggestion with the hint
-  `noNeutralForm`.
+  `fallbackStyle` instead. A plural fallback suggestion carries the hint
+  `noNeutralForm`; a singular one carries `checkArticle`, like every singular
+  suggestion in a gendered style.
 - `kind: "noun"`: the stored form is used as is, with the hint `checkCase`
   when the matched masculine form is a genitive or dative form (it differs
   from the first form in its list).
@@ -268,6 +271,14 @@ range does not exist, that target is skipped and nothing is changed for it.
 Both functions resolve with `{ done, stale }`: how many targets were applied
 and how many were skipped as stale.
 
+The editor accepts one plugin command at a time, so `document.js` runs
+commands strictly one after another: the next one starts only when the
+previous one's callback has fired. A command that has not answered within 120
+seconds rejects for its caller. The panel disables its document actions while
+a command is running, and sends replacements in batches of 25 targets that
+never split a paragraph, showing progress, so that a large "Replace all" does
+not run as one long command.
+
 Implementation risk: the exact API call that replaces a range's text while
 keeping its formatting must be confirmed in a running editor. The
 implementation plan tests this first, before the UI is built on top of it.
@@ -292,6 +303,13 @@ Behaviour:
 - "Replace" replaces that finding with the chosen suggestion, then rescans the
   document so that positions are current.
 - "Replace all" uses each finding's currently chosen suggestion, then rescans.
+- A suggestion the user picked for a finding stays selected when the list is
+  rebuilt (after a replace, an ignore, or a settings change). Picks are reset
+  when the primary style changes.
+- During the rescan that follows a replace, the list stays visible and
+  disabled instead of emptying.
+- Saving or deleting a user entry re-enables it if it had been set to "Never
+  flag"; user entries have the same enable checkbox as bundled words.
 - "Ignore" hides the finding until the next manual scan. A third button,
   "Never flag", adds the entry to `disabledIds`.
 - Changing the primary style recomputes suggestions without rescanning.
