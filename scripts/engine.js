@@ -135,6 +135,90 @@
     return [finding.p, finding.form, finding.context.before.slice(-20), finding.context.after.slice(0, 20)].join("|");
   }
 
+  var SEPARATORS = { colon: ":", asterisk: "*", underscore: "_" };
+  var WEAK_PREV = new Set([
+    "der", "die", "den", "dem", "des",
+    "diese", "diesen", "dieser",
+    "alle", "allen", "aller",
+    "unsere", "unseren", "unserer",
+    "ihre", "ihren", "ihrer",
+    "keine", "keinen", "keiner",
+    "beide", "beiden",
+    "zum", "zur", "im", "am", "vom", "beim"
+  ]);
+
+  function genderedText(entry, style, number, form) {
+    var plural = number === "pl";
+    if (SEPARATORS[style]) return entry.stem + SEPARATORS[style] + (plural ? "innen" : "in");
+    if (style === "binnenI") return entry.stem + (plural ? "Innen" : "In");
+    if (style === "slash") {
+      return form === entry.stem
+        ? form + (plural ? "/-innen" : "/-in")
+        : entry.fem[number] + "/" + form;
+    }
+    return entry.fem[number] + (plural ? " und " : " oder ") + form;
+  }
+
+  function gendered(entry, style, number, form, forcedHint) {
+    var suggestion = { text: genderedText(entry, style, number, form), style: style, number: number };
+    var hint = forcedHint || (number === "sg" ? "checkArticle" : null);
+    if (hint) suggestion.hint = hint;
+    return [suggestion];
+  }
+
+  function neutral(finding, entry, number, fallbackStyle) {
+    var n = entry.neutral;
+    var form = finding.form;
+    if (!n || !n[number]) return gendered(entry, fallbackStyle, number, form, "noNeutralForm");
+    if (n.kind === "noun") {
+      var suggestion = { text: n[number], style: "neutral", number: number };
+      if (form !== entry.masc[number][0]) suggestion.hint = "checkCase";
+      return [suggestion];
+    }
+    var dativePlural = number === "pl" && form !== entry.masc.pl[0] && form.endsWith("n");
+    var weak = WEAK_PREV.has(finding.prev) || dativePlural;
+    return (weak ? ["n", ""] : ["", "n"]).map(function (ending) {
+      return { text: n[number] + ending, style: "neutral", number: number };
+    });
+  }
+
+  function pushUnique(list, suggestions) {
+    suggestions.forEach(function (suggestion) {
+      var known = list.some(function (other) {
+        return other.text === suggestion.text;
+      });
+      if (!known) list.push(suggestion);
+    });
+  }
+
+  function suggest(finding, entry, style, fallbackStyle) {
+    var out = [];
+    ["pl", "sg"].forEach(function (number) {
+      if (finding.numbers.indexOf(number) < 0) return;
+      pushUnique(out, style === "neutral"
+        ? neutral(finding, entry, number, fallbackStyle)
+        : gendered(entry, style, number, finding.form));
+    });
+    return out;
+  }
+
+  function suggestAll(finding, entry, primaryStyle, fallbackStyle) {
+    var out = [];
+    var order = [primaryStyle].concat(STYLES.filter(function (style) {
+      return style !== primaryStyle;
+    }));
+    order.forEach(function (style) {
+      pushUnique(out, suggest(finding, entry, style, fallbackStyle));
+    });
+    return out;
+  }
+
+  function orderForReplace(targets) {
+    return targets.slice().sort(function (a, b) {
+      return b.p - a.p || b.start - a.start;
+    });
+  }
+
   GNH.engine = {
     STYLES: STYLES,
     validateEntry: validateEntry,
@@ -142,7 +226,10 @@
     buildIndex: buildIndex,
     scanParagraph: scanParagraph,
     scanDocument: scanDocument,
-    findingKey: findingKey
+    findingKey: findingKey,
+    suggest: suggest,
+    suggestAll: suggestAll,
+    orderForReplace: orderForReplace
   };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = GNH.engine;

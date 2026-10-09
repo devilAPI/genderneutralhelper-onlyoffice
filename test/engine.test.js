@@ -193,3 +193,104 @@ test("findingKey separates findings and is stable for equal findings", () => {
   assert.notEqual(engine.findingKey(a[0]), engine.findingKey(a[1]));
   assert.equal(engine.findingKey(a[0]), engine.findingKey(b[0]));
 });
+
+const finding = (form, numbers, prev) => ({ form, numbers, prev: prev === undefined ? null : prev });
+const texts = (list) => list.map((s) => s.text);
+
+test("suggest builds separator styles for both numbers, plural first", () => {
+  const f = finding("Mitarbeiter", ["sg", "pl"]);
+  assert.deepEqual(engine.suggest(f, MIT, "colon", "colon"), [
+    { text: "Mitarbeiter:innen", style: "colon", number: "pl" },
+    { text: "Mitarbeiter:in", style: "colon", number: "sg", hint: "checkArticle" }
+  ]);
+  assert.deepEqual(texts(engine.suggest(f, MIT, "asterisk", "colon")), ["Mitarbeiter*innen", "Mitarbeiter*in"]);
+  assert.deepEqual(texts(engine.suggest(f, MIT, "underscore", "colon")), ["Mitarbeiter_innen", "Mitarbeiter_in"]);
+  assert.deepEqual(texts(engine.suggest(f, MIT, "binnenI", "colon")), ["MitarbeiterInnen", "MitarbeiterIn"]);
+});
+
+test("suggest uses the stem for weak and umlaut nouns", () => {
+  assert.deepEqual(texts(engine.suggest(finding("Kunden", ["sg", "pl"]), KUNDE, "colon", "colon")), ["Kund:innen", "Kund:in"]);
+  assert.deepEqual(texts(engine.suggest(finding("Ärzten", ["pl"]), ARZT, "colon", "colon")), ["Ärzt:innen"]);
+  assert.deepEqual(texts(engine.suggest(finding("Arzt", ["sg"]), ARZT, "asterisk", "colon")), ["Ärzt*in"]);
+  assert.deepEqual(texts(engine.suggest(finding("Ärzte", ["pl"]), ARZT, "binnenI", "colon")), ["ÄrztInnen"]);
+});
+
+test("suggest writes the short slash form only when the form equals the stem", () => {
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeiter", ["sg", "pl"]), MIT, "slash", "colon")), ["Mitarbeiter/-innen", "Mitarbeiter/-in"]);
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeitern", ["pl"]), MIT, "slash", "colon")), ["Mitarbeiterinnen/Mitarbeitern"]);
+  assert.deepEqual(texts(engine.suggest(finding("Kunden", ["sg", "pl"]), KUNDE, "slash", "colon")), ["Kundinnen/Kunden", "Kundin/Kunden"]);
+});
+
+test("suggest keeps the matched case in pair style", () => {
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeitern", ["pl"]), MIT, "pair", "colon")), ["Mitarbeiterinnen und Mitarbeitern"]);
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeiter", ["sg", "pl"]), MIT, "pair", "colon")), ["Mitarbeiterinnen und Mitarbeiter", "Mitarbeiterin oder Mitarbeiter"]);
+  assert.equal(engine.suggest(finding("Arzt", ["sg"]), ARZT, "pair", "colon")[0].hint, "checkArticle");
+});
+
+test("suggest picks the participle ending from the preceding word", () => {
+  const strong = engine.suggest(finding("Mitarbeiter", ["sg", "pl"]), MIT, "neutral", "colon");
+  assert.deepEqual(strong, [
+    { text: "Mitarbeitende", style: "neutral", number: "pl" },
+    { text: "Mitarbeitenden", style: "neutral", number: "pl" }
+  ]);
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeiter", ["sg", "pl"], "die"), MIT, "neutral", "colon")), ["Mitarbeitenden", "Mitarbeitende"]);
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeiter", ["sg", "pl"], "zum"), MIT, "neutral", "colon")), ["Mitarbeitenden", "Mitarbeitende"]);
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeiter", ["sg", "pl"], "viele"), MIT, "neutral", "colon")), ["Mitarbeitende", "Mitarbeitenden"]);
+});
+
+test("suggest uses the weak participle ending for a dative plural", () => {
+  assert.deepEqual(texts(engine.suggest(finding("Mitarbeitern", ["pl"], "mit"), MIT, "neutral", "colon")), ["Mitarbeitenden", "Mitarbeitende"]);
+});
+
+test("suggest uses noun neutrals as stored and flags oblique cases", () => {
+  assert.deepEqual(engine.suggest(finding("Lehrer", ["sg", "pl"]), LEHRER, "neutral", "colon"), [
+    { text: "Lehrkräfte", style: "neutral", number: "pl" },
+    { text: "Lehrkraft", style: "neutral", number: "sg" }
+  ]);
+  assert.deepEqual(engine.suggest(finding("Lehrern", ["pl"]), LEHRER, "neutral", "colon"), [
+    { text: "Lehrkräfte", style: "neutral", number: "pl", hint: "checkCase" }
+  ]);
+  assert.equal(engine.suggest(finding("Lehrers", ["sg"]), LEHRER, "neutral", "colon")[0].hint, "checkCase");
+});
+
+test("suggest falls back when there is no neutral form", () => {
+  assert.deepEqual(engine.suggest(finding("Kunden", ["sg", "pl"]), KUNDE, "neutral", "asterisk"), [
+    { text: "Kund*innen", style: "asterisk", number: "pl", hint: "noNeutralForm" },
+    { text: "Kund*in", style: "asterisk", number: "sg", hint: "noNeutralForm" }
+  ]);
+  const sgOnly = Object.assign({}, LEHRER, { neutral: { kind: "noun", sg: "Lehrkraft" } });
+  assert.deepEqual(texts(engine.suggest(finding("Lehrer", ["sg", "pl"]), sgOnly, "neutral", "colon")), ["Lehrer:innen", "Lehrkraft"]);
+});
+
+test("suggestAll starts with the primary style and has unique texts", () => {
+  const all = engine.suggestAll(finding("Mitarbeiter", ["sg", "pl"]), MIT, "colon", "asterisk");
+  assert.equal(all[0].text, "Mitarbeiter:innen");
+  assert.equal(all[1].text, "Mitarbeiter:in");
+  assert.equal(new Set(texts(all)).size, all.length);
+  assert.ok(texts(all).includes("Mitarbeitende"));
+  assert.ok(texts(all).includes("Mitarbeiterinnen und Mitarbeiter"));
+});
+
+test("suggestAll does not repeat fallback suggestions", () => {
+  const all = engine.suggestAll(finding("Kunde", ["sg"]), KUNDE, "neutral", "colon");
+  assert.deepEqual(all[0], { text: "Kund:in", style: "colon", number: "sg", hint: "noNeutralForm" });
+  assert.equal(texts(all).filter((t) => t === "Kund:in").length, 1);
+});
+
+test("orderForReplace sorts last paragraph and last position first without mutating", () => {
+  const input = [{ p: 0, start: 5 }, { p: 2, start: 1 }, { p: 0, start: 30 }, { p: 2, start: 9 }];
+  const copy = input.slice();
+  assert.deepEqual(engine.orderForReplace(input), [{ p: 2, start: 9 }, { p: 2, start: 1 }, { p: 0, start: 30 }, { p: 0, start: 5 }]);
+  assert.deepEqual(input, copy);
+});
+
+test("ordinals of earlier findings survive replacing later ones first", () => {
+  const text = "Mitarbeiter danken den Mitarbeitern.";
+  const found = engine.scanDocument([text], INDEX);
+  const ordered = engine.orderForReplace(found);
+  assert.equal(ordered[0].form, "Mitarbeitern");
+  const after = text.slice(0, ordered[0].start) + "Mitarbeiterinnen und Mitarbeitern" + text.slice(ordered[0].start + ordered[0].form.length);
+  let at = -1;
+  for (let i = 0; i <= ordered[1].ordinal; i++) at = after.indexOf(ordered[1].form, at + 1);
+  assert.equal(at, ordered[1].start);
+});
