@@ -1,0 +1,38 @@
+{
+  "name": "Gender-Neutral Wording",
+  "nameLocale": { "de": "Gendergerechte Sprache" },
+  "guid": "asc.{6F1C2A9E-3B7D-4E58-9A41-C2D07B5E8F13}",
+  "version": "0.1.0",
+  "minVersion": "8.1.0",
+  "variations": [
+    {
+      "description": "Finds generic-masculine German person nouns and offers gender-inclusive replacements.",
+      "descriptionLocale": {
+        "de": "Findet generisch maskuline Personenbezeichnungen und schlägt gendergerechte Formen vor."
+      },
+      "url": "index.html",
+      "icons": [
+        {
+          "style": "light",
+          "100%": { "normal": "resources/img/light/icon.png" },
+          "200%": { "normal": "resources/img/light/icon@2x.png" }
+        },
+        {
+          "style": "dark",
+          "100%": { "normal": "resources/img/dark/icon.png" },
+          "200%": { "normal": "resources/img/dark/icon@2x.png" }
+        }
+      ],
+      "isViewer": false,
+      "EditorsSupport": ["word"],
+      "type": "panelRight",
+      "isVisual": true,
+      "isModal": false,
+      "isInsideMode": false,
+      "initDataType": "none",
+      "initData": "",
+      "buttons": [],
+      "events": []
+    }
+  ]
+}
