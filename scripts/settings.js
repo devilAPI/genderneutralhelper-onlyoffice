@@ -89,6 +89,24 @@
     return entry;
   }
 
+  function without(list, ids) {
+    return list.filter(function (id) {
+      return ids.indexOf(id) < 0;
+    });
+  }
+
+  // disabledIds after a user entry was saved: the saved word is enabled, and
+  // so is the id the entry had before the edit.
+  function disabledAfterSave(disabledIds, id, previousId) {
+    return without(disabledIds, [id, previousId]);
+  }
+
+  // disabledIds after a user entry was deleted. If a bundled word has the
+  // same id, that word comes back and keeps its disabled state.
+  function disabledAfterDelete(disabledIds, id, bundledIds) {
+    return without(disabledIds, bundledIds.indexOf(id) < 0 ? [id] : []);
+  }
+
   GNH.settings = {
     KEY: KEY,
     defaults: defaults,
@@ -96,7 +114,9 @@
     serialize: serialize,
     load: load,
     save: save,
-    deriveEntry: deriveEntry
+    deriveEntry: deriveEntry,
+    disabledAfterSave: disabledAfterSave,
+    disabledAfterDelete: disabledAfterDelete
   };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = GNH.settings;

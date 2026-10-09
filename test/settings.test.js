@@ -102,3 +102,34 @@ test("deriveEntry rejects incomplete or unusable input", () => {
   assert.equal(settings.deriveEntry(Object.assign({}, ok, { mascSg: undefined })), null);
   assert.equal(settings.deriveEntry(null), null);
 });
+
+test("disabledAfterSave re-enables the saved id and the id it replaced", () => {
+  assert.deepEqual(settings.disabledAfterSave(["kunde", "tutor", "coach"], "tutor", undefined), ["kunde", "coach"]);
+  assert.deepEqual(settings.disabledAfterSave(["kunde", "tutor", "coach"], "tutorin", "tutor"), ["kunde", "coach"]);
+  assert.deepEqual(settings.disabledAfterSave(["tutor", "coach", "tutor"], "coach", "tutor"), []);
+});
+
+test("disabledAfterSave leaves other ids alone and does not mutate", () => {
+  const disabled = ["kunde", "arzt"];
+  const next = settings.disabledAfterSave(disabled, "tutor", null);
+  assert.deepEqual(next, ["kunde", "arzt"]);
+  assert.notEqual(next, disabled);
+  assert.deepEqual(disabled, ["kunde", "arzt"]);
+});
+
+test("disabledAfterDelete forgets the id of a purely custom entry", () => {
+  assert.deepEqual(settings.disabledAfterDelete(["kunde", "tutor"], "tutor", ["kunde", "arzt"]), ["kunde"]);
+  assert.deepEqual(settings.disabledAfterDelete(["tutor", "tutor"], "tutor", []), []);
+});
+
+test("disabledAfterDelete keeps the state of a bundled word", () => {
+  assert.deepEqual(settings.disabledAfterDelete(["kunde", "tutor"], "kunde", ["kunde", "arzt"]), ["kunde", "tutor"]);
+  assert.deepEqual(settings.disabledAfterDelete(["tutor"], "kunde", ["kunde"]), ["tutor"]);
+});
+
+test("disabledAfterDelete copes with an entry without a usable id", () => {
+  const disabled = ["kunde"];
+  const next = settings.disabledAfterDelete(disabled, undefined, ["kunde"]);
+  assert.deepEqual(next, ["kunde"]);
+  assert.notEqual(next, disabled);
+});

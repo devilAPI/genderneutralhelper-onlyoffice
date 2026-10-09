@@ -40,12 +40,38 @@
     return hasForms ? entry.masc.sg[0] + " / " + entry.masc.pl[0] : String((entry && entry.id) || "?");
   }
 
+  function bundledIds() {
+    return GNH.dictionary.map(function (entry) {
+      return entry.id;
+    });
+  }
+
+  // Checkbox that turns one word on or off through disabledIds.
+  function enabledBox(domId, entryId) {
+    var disabled = settings().disabledIds;
+    var box = api.el("input", {
+      type: "checkbox",
+      id: domId,
+      checked: disabled.indexOf(entryId) < 0,
+      onchange: function () {
+        var others = disabled.filter(function (id) { return id !== entryId; });
+        update({ disabledIds: box.checked ? others : others.concat(entryId) });
+      }
+    });
+    return box;
+  }
+
   function customList() {
     var el = api.el;
     var entries = settings().customEntries;
     return el("ul", { className: "plain-list" }, entries.map(function (entry, index) {
       var buttons = [];
+      var head = [el("span", { text: entryLabel(entry) })];
       if (GNH.engine.validateEntry(entry)) {
+        head = [
+          enabledBox("own-" + index, entry.id),
+          el("label", { htmlFor: "own-" + index, text: entryLabel(entry) })
+        ];
         buttons.push(el("button", {
           type: "button",
           text: api.t("edit"),
@@ -57,10 +83,13 @@
         text: api.t("remove"),
         onclick: function () {
           editingIndex = -1;
-          update({ customEntries: entries.filter(function (other, i) { return i !== index; }) });
+          update({
+            customEntries: entries.filter(function (other, i) { return i !== index; }),
+            disabledIds: GNH.settings.disabledAfterDelete(settings().disabledIds, entry && entry.id, bundledIds())
+          });
         }
       }));
-      return el("li", {}, [el("span", { text: entryLabel(entry) })].concat(buttons));
+      return el("li", {}, head.concat(buttons));
     }));
   }
 
@@ -103,8 +132,12 @@
         var kept = entries.filter(function (other, i) {
           return i !== editingIndex && (!other || other.id !== entry.id);
         });
+        var previous = editingIndex >= 0 ? entries[editingIndex] : null;
         editingIndex = -1;
-        update({ customEntries: kept.concat(entry) });
+        update({
+          customEntries: kept.concat(entry),
+          disabledIds: GNH.settings.disabledAfterSave(settings().disabledIds, entry.id, previous && previous.id)
+        });
       }
     }));
     return nodes;
@@ -112,22 +145,13 @@
 
   function bundledRows(list) {
     var el = api.el;
-    var disabled = settings().disabledIds;
     var needle = filter.trim().toLowerCase();
     var matches = GNH.dictionary.filter(function (entry) {
       return entry.id.indexOf(needle) >= 0;
     });
     list.textContent = "";
     matches.slice(0, MAX_ROWS).forEach(function (entry) {
-      var box = el("input", {
-        type: "checkbox",
-        id: "word-" + entry.id,
-        checked: disabled.indexOf(entry.id) < 0,
-        onchange: function () {
-          var others = disabled.filter(function (id) { return id !== entry.id; });
-          update({ disabledIds: box.checked ? others : others.concat(entry.id) });
-        }
-      });
+      var box = enabledBox("word-" + entry.id, entry.id);
       list.appendChild(el("li", {}, [box, el("label", { htmlFor: "word-" + entry.id, text: entry.masc.sg[0] })]));
     });
     if (matches.length > MAX_ROWS) {
@@ -155,7 +179,10 @@
     doc.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    // Revoking at once can cancel the download before it has started.
+    window.setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 1000);
   }
 
   function readImport(file) {
