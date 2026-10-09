@@ -29,7 +29,29 @@
     style_underscore: "Unterstrich (Mitarbeiter_innen)",
     style_binnenI: "Binnen-I (MitarbeiterInnen)",
     style_slash: "Schrägstrich (Mitarbeiter/-innen)",
-    style_pair: "Paarform (Mitarbeiterinnen und Mitarbeiter)"
+    style_pair: "Paarform (Mitarbeiterinnen und Mitarbeiter)",
+    fallback: "Ersatz, wenn es keine neutrale Form gibt",
+    ownEntries: "Eigene Einträge",
+    mascSg: "Maskulin Singular",
+    mascPl: "Maskulin Plural",
+    femSg: "Feminin Singular",
+    femPl: "Feminin Plural",
+    neutralSg: "Neutral Singular (optional)",
+    neutralPl: "Neutral Plural (optional)",
+    save: "Speichern",
+    edit: "Bearbeiten",
+    remove: "Löschen",
+    invalidEntry: "Bitte alle Pflichtfelder mit je einem Wort ausfüllen. Die feminine Singularform muss auf „in“ enden.",
+    skippedEntries: "Ungültige Einträge werden nicht verwendet: %1",
+    bundled: "Mitgelieferte Wörter",
+    search: "Wort suchen",
+    more: "Weitere Treffer: %1",
+    exportFile: "Exportieren",
+    importFile: "Importieren",
+    importConfirm: "Aktuelle Einstellungen durch die Datei ersetzen?",
+    importInvalid: "Die Datei enthält keine gültigen Einstellungen.",
+    yes: "Ja",
+    cancel: "Abbrechen"
   };
 
   if (typeof module !== "undefined" && module.exports) {
